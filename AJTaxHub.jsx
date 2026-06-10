@@ -1,0 +1,676 @@
+import { useState, useRef } from "react";
+
+// ── Brand ─────────────────────────────────────────────────────────────────
+const FIRM_NAME = "AJ TaxHub";
+const FIRM_FULL = "Burns & AJ Tax Service, L.L.C.";
+const FIRM_TAGLINE = "Tax · Bookkeeping · Payroll · Notary";
+const BRAND_NAVY = "#2E8B57";
+const BRAND_GOLD = "#D4AF37";
+const BRAND_GREEN = "#27AE60";
+const BRAND_RED = "#DC2626";
+
+// ── Schedule C Categories (IRS-aligned) ──────────────────────────────────
+const CATEGORIES = [
+  "Advertising", "Car & Truck Expenses", "Commissions & Fees",
+  "Contract Labor", "Depletion", "Depreciation",
+  "Employee Benefit Programs", "Insurance (Other than Health)",
+  "Interest – Mortgage", "Interest – Other", "Legal & Professional",
+  "Office Expense", "Pension & Profit-Sharing", "Rent – Machinery/Equipment",
+  "Rent – Other Business Property", "Repairs & Maintenance",
+  "Supplies", "Taxes & Licenses", "Travel",
+  "Meals (50% deductible)", "Utilities", "Wages",
+  "Other Expense", "Mileage"
+];
+
+const fmtCurrency = (n) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n || 0);
+const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-US") : "";
+const generateId = () => Math.random().toString(36).slice(2, 10);
+const today = () => new Date().toISOString().split("T")[0];
+
+const DEMO_CLIENT = {
+  id: "c001", name: "Maria Santos", ssn_last4: "5821",
+  business: "Maria's Cleaning Services", year: "2025"
+};
+
+function useStore() {
+  const [clients] = useState([DEMO_CLIENT]);
+  const [transactions, setTransactions] = useState([
+    { id: "t1", clientId: "c001", date: "2025-03-15", type: "income", amount: 1200, description: "Cleaning – Johnson residence", category: "Wages", receipt: null },
+    { id: "t2", clientId: "c001", date: "2025-03-18", type: "expense", amount: 89.50, description: "Cleaning supplies – Home Depot", category: "Supplies", receipt: null },
+    { id: "t3", clientId: "c001", date: "2025-03-22", type: "expense", amount: 120.60, description: "Business mileage – 180 miles", category: "Mileage", receipt: null },
+    { id: "t4", clientId: "c001", date: "2025-04-01", type: "income", amount: 950, description: "April retainer – office cleaning", category: "Wages", receipt: null },
+    { id: "t5", clientId: "c001", date: "2025-04-05", type: "expense", amount: 220, description: "Liability insurance – quarterly", category: "Insurance (Other than Health)", receipt: null },
+  ]);
+  const [messages, setMessages] = useState([
+    { id: "m1", clientId: "c001", from: "client", text: "Hi AJ! I uploaded all my Q1 receipts. Let me know if you need anything else.", date: "2025-04-10" },
+    { id: "m2", clientId: "c001", from: "preparer", text: "Thanks Maria! Looking good — I see a few mileage entries without a purpose. Can you add those?", date: "2025-04-11" },
+  ]);
+  const [submitted, setSubmitted] = useState({});
+
+  const addTransaction = (t) => setTransactions(prev => [...prev, { ...t, id: generateId() }]);
+  const deleteTransaction = (id) => setTransactions(prev => prev.filter(t => t.id !== id));
+  const addMessage = (msg) => setMessages(prev => [...prev, { ...msg, id: generateId(), date: today() }]);
+  const submitToPrep = (clientId) => setSubmitted(prev => ({ ...prev, [clientId]: new Date().toLocaleString() }));
+
+  return { clients, transactions, messages, submitted, addTransaction, deleteTransaction, addMessage, submitToPrep };
+}
+
+// ── Root ──────────────────────────────────────────────────────────────────
+export default function App() {
+  const [view, setView] = useState("client");
+  const store = useStore();
+
+  return (
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: "#F0F2F5", minHeight: "100vh" }}>
+      {/* Nav */}
+      <nav style={{ background: BRAND_NAVY, padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 58, boxShadow: "0 2px 12px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Logo mark */}
+          <div style={{ width: 38, height: 38, borderRadius: 9, background: `linear-gradient(135deg, ${BRAND_GOLD}, #B8860B)`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 6px rgba(245,158,11,0.4)" }}>
+            <span style={{ fontWeight: 900, color: "white", fontSize: 17, letterSpacing: -1 }}>AJ</span>
+          </div>
+          <div>
+            <div style={{ color: "white", fontWeight: 800, fontSize: 16, letterSpacing: -0.5 }}>{FIRM_NAME}</div>
+            <div style={{ color: BRAND_GOLD, fontSize: 9, letterSpacing: 0.8, textTransform: "uppercase" }}>{FIRM_TAGLINE}</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.08)", borderRadius: 8, padding: 3 }}>
+          {[["client", "👤 My Tracker"], ["preparer", "🗂 AJ's Dashboard"]].map(([v, l]) => (
+            <button key={v} onClick={() => setView(v)} style={{
+              padding: "5px 13px", borderRadius: 6, border: "none", cursor: "pointer",
+              fontSize: 11, fontWeight: 700,
+              background: view === v ? BRAND_GOLD : "transparent",
+              color: view === v ? BRAND_NAVY : "#A0BAD4"
+            }}>{l}</button>
+          ))}
+        </div>
+      </nav>
+
+      {view === "client"
+        ? <ClientView store={store} clientId="c001" />
+        : <PreparerView store={store} />}
+    </div>
+  );
+}
+
+// ── CLIENT VIEW ───────────────────────────────────────────────────────────
+function ClientView({ store, clientId }) {
+  const [tab, setTab] = useState("dashboard");
+  const client = store.clients.find(c => c.id === clientId);
+  const myTx = store.transactions.filter(t => t.clientId === clientId);
+  const income = myTx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expenses = myTx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const net = income - expenses;
+  const myMsgs = store.messages.filter(m => m.clientId === clientId);
+  const unreadCount = myMsgs.filter(m => m.from === "preparer").length;
+
+  const tabs = [
+    { id: "dashboard", icon: "📊", label: "Summary" },
+    { id: "add",       icon: "➕", label: "Add" },
+    { id: "history",   icon: "📋", label: "History" },
+    { id: "mileage",   icon: "🚗", label: "Mileage" },
+    { id: "messages",  icon: "💬", label: unreadCount ? `Chat (${unreadCount})` : "Chat" },
+    { id: "send",      icon: "📤", label: "Submit" },
+  ];
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", paddingBottom: 80 }}>
+      {/* Client Header */}
+      <div style={{ background: `linear-gradient(135deg, ${BRAND_NAVY}, #3DAA6A)`, padding: "20px 20px 18px", color: "white" }}>
+        <div style={{ fontSize: 11, color: BRAND_GOLD, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 2 }}>{client.year} Tax Year</div>
+        <div style={{ fontSize: 19, fontWeight: 800 }}>{client.business}</div>
+        <div style={{ fontSize: 12, color: "#BAD6F5", marginBottom: 14 }}>{client.name} · Prepared by {FIRM_NAME}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+          {[["Income", income, "#34D399"], ["Expenses", expenses, "#F87171"], ["Net Profit", net, net >= 0 ? "#34D399" : BRAND_GOLD]].map(([l, v, c]) => (
+            <div key={l} style={{ background: "rgba(255,255,255,0.09)", borderRadius: 10, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontSize: 9, color: "#BAD6F5", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>{l}</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: c }}>{fmtCurrency(v)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab Bar */}
+      <div style={{ background: "white", display: "flex", overflowX: "auto", borderBottom: "1px solid #E5E7EB", padding: "0 2px" }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            flex: 1, minWidth: 60, padding: "11px 6px 9px", border: "none", background: "none", cursor: "pointer",
+            fontSize: 10, fontWeight: tab === t.id ? 800 : 500, whiteSpace: "nowrap",
+            color: tab === t.id ? BRAND_NAVY : "#9CA3AF",
+            borderBottom: `2px solid ${tab === t.id ? BRAND_GOLD : "transparent"}`
+          }}>{t.icon}<br />{t.label}</button>
+        ))}
+      </div>
+
+      <div style={{ padding: 14 }}>
+        {tab === "dashboard" && <ClientDashboard tx={myTx} />}
+        {tab === "add"       && <AddEntry store={store} clientId={clientId} onAdded={() => setTab("history")} />}
+        {tab === "history"   && <History tx={myTx} onDelete={store.deleteTransaction} />}
+        {tab === "mileage"   && <MileageLog tx={myTx} store={store} clientId={clientId} />}
+        {tab === "messages"  && <Messages msgs={myMsgs} store={store} clientId={clientId} role="client" />}
+        {tab === "send"      && <SendToPrep store={store} clientId={clientId} tx={myTx} income={income} expenses={expenses} net={net} />}
+      </div>
+    </div>
+  );
+}
+
+function ClientDashboard({ tx }) {
+  const byCategory = {};
+  tx.filter(t => t.type === "expense").forEach(t => {
+    byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
+  });
+  const top = Object.entries(byCategory).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card title="Top Expense Categories">
+        {top.length === 0
+          ? <p style={{ color: "#9CA3AF", fontSize: 13 }}>No expenses recorded yet.</p>
+          : top.map(([cat, amt]) => (
+            <div key={cat} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: "1px solid #F3F4F6" }}>
+              <span style={{ fontSize: 13, color: "#374151" }}>{cat}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: BRAND_RED }}>{fmtCurrency(amt)}</span>
+            </div>
+          ))}
+      </Card>
+      <Card title="Recent Activity">
+        {tx.slice(-5).reverse().map(t => (
+          <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid #F3F4F6" }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{t.description}</div>
+              <div style={{ fontSize: 11, color: "#9CA3AF" }}>{fmtDate(t.date)} · {t.category}</div>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: t.type === "income" ? BRAND_GREEN : BRAND_RED, whiteSpace: "nowrap", marginLeft: 8 }}>
+              {t.type === "income" ? "+" : "−"}{fmtCurrency(t.amount)}
+            </span>
+          </div>
+        ))}
+      </Card>
+      <div style={{ background: "#FFF8E7", border: `1px solid ${BRAND_GOLD}`, borderRadius: 10, padding: "12px 14px", fontSize: 12, color: "#92400E" }}>
+        <strong>💡 Tip from AJ:</strong> Take a photo of every receipt right away — it's the #1 way to maximize your deductions and protect yourself in an audit.
+      </div>
+    </div>
+  );
+}
+
+function AddEntry({ store, clientId, onAdded }) {
+  const [form, setForm] = useState({ type: "expense", date: today(), amount: "", description: "", category: CATEGORIES[0], receipt: null });
+  const [receiptName, setReceiptName] = useState("");
+  const fileRef = useRef();
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (file) { setReceiptName(file.name); set("receipt", file.name); }
+  };
+
+  const submit = () => {
+    if (!form.amount || !form.description || !form.date) return alert("Please fill in date, amount, and description.");
+    store.addTransaction({ ...form, amount: parseFloat(form.amount), clientId });
+    onAdded();
+  };
+
+  return (
+    <Card title="Add Income or Expense">
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {["income", "expense"].map(t => (
+          <button key={t} onClick={() => set("type", t)} style={{
+            flex: 1, padding: "10px", borderRadius: 8, border: "2px solid",
+            borderColor: form.type === t ? (t === "income" ? BRAND_GREEN : BRAND_RED) : "#E5E7EB",
+            background: form.type === t ? (t === "income" ? "#ECFDF5" : "#FEF2F2") : "white",
+            color: form.type === t ? (t === "income" ? BRAND_GREEN : BRAND_RED) : "#9CA3AF",
+            fontWeight: 700, fontSize: 13, cursor: "pointer"
+          }}>{t === "income" ? "💰 Income" : "💸 Expense"}</button>
+        ))}
+      </div>
+      <Label>Date</Label>
+      <Input type="date" value={form.date} onChange={e => set("date", e.target.value)} />
+      <Label>Amount ($)</Label>
+      <Input type="number" placeholder="0.00" value={form.amount} onChange={e => set("amount", e.target.value)} />
+      <Label>Description</Label>
+      <Input placeholder="What was this for?" value={form.description} onChange={e => set("description", e.target.value)} />
+      <Label>Schedule C Category</Label>
+      <select value={form.category} onChange={e => set("category", e.target.value)}
+        style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, color: "#374151", background: "white", marginBottom: 12 }}>
+        {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+      </select>
+      <Label>Receipt Photo (optional)</Label>
+      <div onClick={() => fileRef.current.click()} style={{ border: "2px dashed #D1D5DB", borderRadius: 8, padding: "16px", textAlign: "center", cursor: "pointer", background: "#F9FAFB", marginBottom: 14 }}>
+        <div style={{ fontSize: 26 }}>📷</div>
+        <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{receiptName || "Tap to upload receipt"}</div>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleFile} />
+      </div>
+      <button onClick={submit} style={{ width: "100%", padding: "13px", borderRadius: 10, border: "none", background: BRAND_NAVY, color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+        Save Entry
+      </button>
+    </Card>
+  );
+}
+
+function History({ tx, onDelete }) {
+  const [filter, setFilter] = useState("all");
+  const filtered = tx.filter(t => filter === "all" || t.type === filter).sort((a, b) => b.date.localeCompare(a.date));
+  const total = filtered.reduce((s, t) => s + (t.type === "income" ? t.amount : -t.amount), 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {["all", "income", "expense"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: "5px 14px", borderRadius: 20, border: "1.5px solid",
+            borderColor: filter === f ? BRAND_NAVY : "#E5E7EB",
+            background: filter === f ? BRAND_NAVY : "white",
+            color: filter === f ? "white" : "#6B7280",
+            fontSize: 11, fontWeight: 700, cursor: "pointer"
+          }}>{f.charAt(0).toUpperCase() + f.slice(1)}</button>
+        ))}
+        <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 700, color: total >= 0 ? BRAND_GREEN : BRAND_RED, alignSelf: "center" }}>
+          {fmtCurrency(Math.abs(total))}
+        </span>
+      </div>
+      {filtered.length === 0 && <p style={{ color: "#9CA3AF", fontSize: 13, textAlign: "center", marginTop: 24 }}>No entries yet. Tap ➕ Add to get started.</p>}
+      {filtered.map(t => (
+        <div key={t.id} style={{ background: "white", borderRadius: 10, padding: "11px 13px", marginBottom: 7, display: "flex", justifyContent: "space-between", alignItems: "flex-start", boxShadow: "0 1px 3px rgba(0,0,0,0.07)" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{t.description}</div>
+            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{fmtDate(t.date)} · {t.category}</div>
+            {t.receipt && <div style={{ fontSize: 10, color: "#3B82F6", marginTop: 2 }}>📎 {t.receipt}</div>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, marginLeft: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 700, color: t.type === "income" ? BRAND_GREEN : BRAND_RED }}>
+              {t.type === "income" ? "+" : "−"}{fmtCurrency(t.amount)}
+            </span>
+            <button onClick={() => onDelete(t.id)} style={{ fontSize: 10, color: "#D1D5DB", border: "none", background: "none", cursor: "pointer" }}>✕</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MileageLog({ tx, store, clientId }) {
+  const [miles, setMiles] = useState("");
+  const [date, setDate] = useState(today());
+  const [purpose, setPurpose] = useState("");
+  const mileageTx = tx.filter(t => t.category === "Mileage");
+  const totalMiles = mileageTx.reduce((s, t) => {
+    const m = parseFloat(t.description.match(/(\d+\.?\d*)\s*miles?/i)?.[1] || 0);
+    return s + m;
+  }, 0);
+  const rate = 0.70; // 2025 IRS rate
+
+  const addMileage = () => {
+    if (!miles || !purpose) return alert("Enter miles and business purpose.");
+    store.addTransaction({
+      clientId, type: "expense", date,
+      amount: parseFloat(miles) * rate,
+      description: `Business mileage – ${miles} miles – ${purpose}`,
+      category: "Mileage", receipt: null
+    });
+    setMiles(""); setPurpose("");
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card title="Log Business Miles">
+        <div style={{ background: "#F0FDF4", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "#1A4A1A" }}>
+          2025 IRS rate: <strong>$0.70/mile</strong> · Logged: <strong>{totalMiles.toFixed(0)} miles</strong> = <strong>{fmtCurrency(totalMiles * rate)}</strong>
+        </div>
+        <Label>Date</Label>
+        <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+        <Label>Miles Driven</Label>
+        <Input type="number" placeholder="e.g. 45" value={miles} onChange={e => setMiles(e.target.value)} />
+        <Label>Business Purpose</Label>
+        <Input placeholder="e.g. Client visit, supply pickup" value={purpose} onChange={e => setPurpose(e.target.value)} />
+        <button onClick={addMileage} style={{ width: "100%", padding: "12px", borderRadius: 10, border: "none", background: BRAND_NAVY, color: "white", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+          🚗 Log Miles
+        </button>
+      </Card>
+      {mileageTx.length > 0 && (
+        <Card title="Mileage Log">
+          {mileageTx.map(t => (
+            <div key={t.id} style={{ padding: "7px 0", borderBottom: "1px solid #F3F4F6", fontSize: 12 }}>
+              <div style={{ fontWeight: 600, color: "#111827" }}>{t.description}</div>
+              <div style={{ color: "#9CA3AF" }}>{fmtDate(t.date)} · {fmtCurrency(t.amount)}</div>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function SendToPrep({ store, clientId, tx, income, expenses, net }) {
+  const submitted = store.submitted[clientId];
+
+  const exportCSV = () => {
+    const rows = [
+      [`${FIRM_NAME} – Schedule C Export`],
+      ["Prepared by:", FIRM_FULL],
+      ["Tax Year:", "2025"],
+      [],
+      ["Date", "Type", "Category", "Description", "Amount", "Receipt"]
+    ];
+    tx.sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
+      rows.push([t.date, t.type, t.category, t.description, t.amount, t.receipt || ""]);
+    });
+    rows.push([], ["", "", "", "Total Income", income], ["", "", "", "Total Expenses", expenses], ["", "", "", "Net Profit / Loss", net]);
+    const csv = rows.map(r => r.join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `AJTaxHub_ScheduleC_2025.csv`;
+    a.click();
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card title="Send to AJ">
+        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 16 }}>
+          {[["Total Income", income, BRAND_GREEN], ["Total Expenses", expenses, BRAND_RED], ["Net Profit / Loss", net, net >= 0 ? BRAND_GREEN : BRAND_GOLD]].map(([l, v, c]) => (
+            <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", background: "#F9FAFB", borderRadius: 8 }}>
+              <span style={{ fontSize: 13, color: "#374151" }}>{l}</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: c }}>{fmtCurrency(v)}</span>
+            </div>
+          ))}
+        </div>
+        {submitted ? (
+          <div style={{ background: "#ECFDF5", border: "1px solid #6EE7B7", borderRadius: 10, padding: "16px", textAlign: "center" }}>
+            <div style={{ fontSize: 28 }}>✅</div>
+            <div style={{ fontWeight: 800, color: BRAND_GREEN, fontSize: 15 }}>Sent to AJ!</div>
+            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4 }}>{submitted}</div>
+            <div style={{ fontSize: 12, color: "#374151", marginTop: 6 }}>AJ will review and reach out if anything is needed.</div>
+          </div>
+        ) : (
+          <button onClick={() => store.submitToPrep(clientId)} style={{ width: "100%", padding: "13px", borderRadius: 10, border: "none", background: BRAND_GREEN, color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer", marginBottom: 8 }}>
+            📤 Submit to AJ TaxHub
+          </button>
+        )}
+        <button onClick={exportCSV} style={{ width: "100%", padding: "11px", borderRadius: 10, border: `1.5px solid ${BRAND_NAVY}`, background: "white", color: BRAND_NAVY, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+          ⬇ Download CSV (Drake Tax Format)
+        </button>
+        <p style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center", marginTop: 8 }}>
+          CSV is formatted for Drake Tax import. You can also email it or bring it to your appointment with AJ.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+function Messages({ msgs, store, clientId, role }) {
+  const [text, setText] = useState("");
+  const send = () => {
+    if (!text.trim()) return;
+    store.addMessage({ clientId, from: role, text });
+    setText("");
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12, maxHeight: 340, overflowY: "auto" }}>
+        {msgs.map(m => (
+          <div key={m.id} style={{ display: "flex", justifyContent: m.from === role ? "flex-end" : "flex-start" }}>
+            <div style={{
+              maxWidth: "80%", borderRadius: 12, padding: "10px 13px",
+              background: m.from === role ? BRAND_NAVY : "white",
+              color: m.from === role ? "white" : "#111827",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.08)"
+            }}>
+              <div style={{ fontSize: 12 }}>{m.text}</div>
+              <div style={{ fontSize: 10, marginTop: 4, color: m.from === role ? "rgba(255,255,255,0.6)" : "#9CA3AF" }}>
+                {m.from === "preparer" ? "AJ TaxHub" : "You"} · {fmtDate(m.date)}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input value={text} onChange={e => setText(e.target.value)} placeholder="Message AJ…"
+          onKeyDown={e => e.key === "Enter" && send()}
+          style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1.5px solid #E5E7EB", fontSize: 13 }} />
+        <button onClick={send} style={{ padding: "10px 16px", borderRadius: 10, border: "none", background: BRAND_NAVY, color: "white", fontWeight: 700, cursor: "pointer" }}>Send</button>
+      </div>
+    </div>
+  );
+}
+
+// ── PREPARER VIEW ─────────────────────────────────────────────────────────
+function PreparerView({ store }) {
+  const [selectedClient, setSelectedClient] = useState(store.clients[0]?.id);
+  const [tab, setTab] = useState("summary");
+  const client = store.clients.find(c => c.id === selectedClient);
+  const tx = store.transactions.filter(t => t.clientId === selectedClient);
+  const income = tx.filter(t => t.type === "income").reduce((s, t) => s + t.amount, 0);
+  const expenses = tx.filter(t => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const net = income - expenses;
+  const submitted = store.submitted[selectedClient];
+
+  const exportDrake = () => {
+    const byCategory = {};
+    tx.filter(t => t.type === "expense").forEach(t => {
+      byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
+    });
+    const rows = [
+      [`${FIRM_NAME} – Drake Tax Schedule C Export`],
+      ["Firm:", FIRM_FULL],
+      ["Client:", client.name], ["Business:", client.business], ["Tax Year:", client.year], [],
+      ["Schedule C Line", "Amount"],
+      ["Gross Receipts (Line 1)", income.toFixed(2)],
+      ...Object.entries(byCategory).map(([cat, amt]) => [cat, amt.toFixed(2)]),
+      [], ["Net Profit / Loss", net.toFixed(2)]
+    ];
+    const csv = rows.map(r => r.join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `Drake_${client.name.replace(/ /g, "_")}_ScheduleC_${client.year}.csv`;
+    a.click();
+  };
+
+  const tabs = [
+    { id: "summary",      label: "📊 Summary" },
+    { id: "transactions", label: "📋 All Entries" },
+    { id: "scheduleC",    label: "📄 Schedule C" },
+    { id: "messages",     label: "💬 Messages" },
+    { id: "deploy",       label: "🚀 Deploy Guide" },
+  ];
+
+  return (
+    <div style={{ maxWidth: 780, margin: "0 auto", padding: "20px 16px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 19, fontWeight: 800, color: BRAND_NAVY }}>{FIRM_NAME} — AJ's Dashboard</div>
+          <div style={{ fontSize: 12, color: "#6B7280" }}>{FIRM_FULL} · Drake Tax Ready</div>
+        </div>
+        {submitted && <div style={{ background: "#ECFDF5", color: BRAND_GREEN, border: "1px solid #6EE7B7", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700 }}>✅ Submitted</div>}
+      </div>
+
+      {/* Client pills */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {store.clients.map(c => (
+          <button key={c.id} onClick={() => setSelectedClient(c.id)} style={{
+            padding: "7px 16px", borderRadius: 8, border: "2px solid",
+            borderColor: selectedClient === c.id ? BRAND_NAVY : "#E5E7EB",
+            background: selectedClient === c.id ? BRAND_NAVY : "white",
+            color: selectedClient === c.id ? "white" : "#374151",
+            fontWeight: 700, fontSize: 13, cursor: "pointer"
+          }}>
+            {c.name}{store.submitted[c.id] ? " ✅" : ""}
+          </button>
+        ))}
+      </div>
+
+      {/* Stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 14 }}>
+        {[["Gross Income", income, BRAND_GREEN], ["Total Expenses", expenses, BRAND_RED], ["Net Profit", net, net >= 0 ? BRAND_GREEN : BRAND_GOLD]].map(([l, v, c]) => (
+          <div key={l} style={{ background: "white", borderRadius: 10, padding: "14px 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)", borderTop: `3px solid ${c}` }}>
+            <div style={{ fontSize: 10, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: 0.5 }}>{l}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: c, marginTop: 4 }}>{fmtCurrency(v)}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tab panel */}
+      <div style={{ background: "white", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", overflow: "hidden" }}>
+        <div style={{ display: "flex", borderBottom: "1px solid #E5E7EB", overflowX: "auto" }}>
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              padding: "12px 16px", border: "none", background: "none", cursor: "pointer", whiteSpace: "nowrap",
+              fontSize: 12, fontWeight: tab === t.id ? 700 : 500,
+              color: tab === t.id ? BRAND_NAVY : "#6B7280",
+              borderBottom: `2px solid ${tab === t.id ? BRAND_GOLD : "transparent"}`
+            }}>{t.label}</button>
+          ))}
+        </div>
+        <div style={{ padding: 16 }}>
+          {tab === "summary"      && <PreparerSummary tx={tx} client={client} income={income} expenses={expenses} exportDrake={exportDrake} />}
+          {tab === "transactions" && <History tx={tx} onDelete={store.deleteTransaction} />}
+          {tab === "scheduleC"    && <ScheduleCView tx={tx} income={income} />}
+          {tab === "messages"     && <Messages msgs={store.messages.filter(m => m.clientId === selectedClient)} store={store} clientId={selectedClient} role="preparer" />}
+          {tab === "deploy"       && <DeployGuide />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreparerSummary({ tx, client, income, expenses, exportDrake }) {
+  const byCategory = {};
+  tx.filter(t => t.type === "expense").forEach(t => {
+    byCategory[t.category] = (byCategory[t.category] || 0) + t.amount;
+  });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ background: "#F0FDF4", border: "1px solid #A7F3D0", borderRadius: 8, padding: "12px 14px" }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: BRAND_NAVY }}>{client.business}</div>
+        <div style={{ fontSize: 12, color: "#1A4A1A" }}>{client.name} · SSN last 4: {client.ssn_last4} · Tax Year {client.year}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>Expense Breakdown</div>
+        {Object.entries(byCategory).sort((a, b) => b[1] - a[1]).map(([cat, amt]) => (
+          <div key={cat} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid #F3F4F6", fontSize: 13 }}>
+            <span style={{ color: "#374151" }}>{cat}</span>
+            <span style={{ fontWeight: 700, color: BRAND_RED }}>{fmtCurrency(amt)}</span>
+          </div>
+        ))}
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", fontSize: 13, fontWeight: 800, color: BRAND_NAVY, borderTop: "2px solid #E5E7EB", marginTop: 4 }}>
+          <span>Total Expenses</span>
+          <span style={{ color: BRAND_RED }}>{fmtCurrency(expenses)}</span>
+        </div>
+      </div>
+      <button onClick={exportDrake} style={{ width: "100%", padding: "13px", borderRadius: 10, border: "none", background: BRAND_NAVY, color: "white", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+        📥 Export Drake Tax CSV
+      </button>
+    </div>
+  );
+}
+
+function ScheduleCView({ tx, income }) {
+  const lines = {
+    "Gross Receipts (Line 1)": income,
+    "Advertising": 0, "Car & Truck Expenses": 0, "Commissions & Fees": 0,
+    "Contract Labor": 0, "Insurance (Other than Health)": 0,
+    "Interest – Mortgage": 0, "Interest – Other": 0, "Legal & Professional": 0,
+    "Office Expense": 0, "Rent – Machinery/Equipment": 0,
+    "Rent – Other Business Property": 0, "Repairs & Maintenance": 0,
+    "Supplies": 0, "Taxes & Licenses": 0, "Travel": 0,
+    "Meals (50% deductible)": 0, "Utilities": 0, "Wages": 0,
+    "Other Expense": 0, "Mileage": 0
+  };
+  tx.filter(t => t.type === "expense").forEach(t => {
+    if (lines[t.category] !== undefined) lines[t.category] += t.amount;
+  });
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 12 }}>Schedule C line-by-line — ready to enter in Drake Tax</div>
+      {Object.entries(lines).map(([line, amt]) => (
+        <div key={line} style={{ display: "flex", justifyContent: "space-between", padding: "7px 10px", borderRadius: 6, marginBottom: 2, background: amt > 0 ? "#F0FDF4" : "#F9FAFB" }}>
+          <span style={{ fontSize: 12, color: "#374151" }}>{line}</span>
+          <span style={{ fontSize: 13, fontWeight: amt > 0 ? 700 : 400, color: line.includes("Gross") ? BRAND_GREEN : amt > 0 ? BRAND_RED : "#D1D5DB" }}>
+            {fmtCurrency(amt)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DeployGuide() {
+  const steps = [
+    {
+      icon: "🌐",
+      title: "Host it as a website",
+      detail: "The easiest path is Netlify or Vercel — both are free. You'd share a link like ajtaxhub.com with clients. They open it on their phone like any website, no app store needed.",
+      cost: "Free – $20/mo"
+    },
+    {
+      icon: "🗄️",
+      title: "Add a real database",
+      detail: "Right now data lives in the browser (demo only). To save client data permanently, add Supabase (free tier) — a simple database that stores all transactions, receipts, and messages securely.",
+      cost: "Free – $25/mo"
+    },
+    {
+      icon: "🔐",
+      title: "Client logins",
+      detail: "Add Clerk.dev or Supabase Auth so each client logs in with their email. You get a passcode or magic link sent to their phone — no password needed. Each client only sees their own data.",
+      cost: "Free – $25/mo"
+    },
+    {
+      icon: "📱",
+      title: "Make it feel like an app",
+      detail: "Add a simple manifest.json file and clients can tap 'Add to Home Screen' on their iPhone or Android. It opens full-screen like a native app — no App Store submission needed.",
+      cost: "Free"
+    },
+    {
+      icon: "📷",
+      title: "Real receipt storage",
+      detail: "Connect Cloudinary or Supabase Storage so receipt photos actually upload and save. You'll be able to view them from your dashboard.",
+      cost: "Free – $10/mo"
+    },
+    {
+      icon: "📧",
+      title: "Email notifications",
+      detail: "Add Resend or SendGrid so you get an email when a client submits their data, and clients get a confirmation. Simple one-line integration.",
+      cost: "Free – $10/mo"
+    },
+  ];
+
+  return (
+    <div>
+      <div style={{ background: `linear-gradient(135deg, ${BRAND_NAVY}, #3DAA6A)`, borderRadius: 10, padding: "16px 18px", marginBottom: 16, color: "white" }}>
+        <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>🚀 How to Launch AJ TaxHub for Real Clients</div>
+        <div style={{ fontSize: 12, color: "#BAD6F5" }}>Full cost to deploy: <strong style={{ color: BRAND_GOLD }}>$0–$60/month</strong> depending on features. Start free and scale up as clients join.</div>
+      </div>
+      {steps.map((s, i) => (
+        <div key={i} style={{ display: "flex", gap: 12, padding: "12px 0", borderBottom: "1px solid #F3F4F6" }}>
+          <div style={{ fontSize: 24, width: 36, textAlign: "center", flexShrink: 0 }}>{s.icon}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontWeight: 700, fontSize: 13, color: BRAND_NAVY }}>Step {i + 1}: {s.title}</span>
+              <span style={{ fontSize: 11, background: "#F0FDF4", color: BRAND_GREEN, borderRadius: 6, padding: "2px 8px", fontWeight: 700 }}>{s.cost}</span>
+            </div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 3, lineHeight: 1.5 }}>{s.detail}</div>
+          </div>
+        </div>
+      ))}
+      <div style={{ background: "#FFF8E7", border: `1px solid ${BRAND_GOLD}`, borderRadius: 10, padding: "12px 14px", marginTop: 14, fontSize: 12, color: "#92400E" }}>
+        <strong>💡 Recommended starting stack:</strong> Vercel (hosting) + Supabase (database + auth + file storage) = fully functional for ~$0/month for your first 50–100 clients. Ask AJ or a developer to set this up in a weekend.
+      </div>
+    </div>
+  );
+}
+
+// ── Shared UI ─────────────────────────────────────────────────────────────
+function Card({ title, children }) {
+  return (
+    <div style={{ background: "white", borderRadius: 12, padding: 16, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", marginBottom: 4 }}>
+      {title && <div style={{ fontSize: 13, fontWeight: 700, color: BRAND_NAVY, marginBottom: 12 }}>{title}</div>}
+      {children}
+    </div>
+  );
+}
+function Label({ children }) {
+  return <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 4 }}>{children}</div>;
+}
+function Input({ ...props }) {
+  return <input {...props} style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1.5px solid #E5E7EB", fontSize: 13, color: "#111827", background: "white", marginBottom: 10, boxSizing: "border-box" }} />;
+}
